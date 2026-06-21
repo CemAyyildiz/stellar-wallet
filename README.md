@@ -38,6 +38,23 @@ Open [http://localhost:5173](http://localhost:5173)
 
 All transactions run on **Stellar Testnet** — no real funds involved.
 
+## Screenshots
+
+### Home Screen
+![Home](./screenshots/01-home.png)
+
+### Wallet Connected (keypair generated)
+![Wallet Generated](./screenshots/02-wallet-generated.png)
+
+### Balance Displayed (after Friendbot funding)
+![Balance](./screenshots/03-balance.png)
+
+### Send XLM Transaction Form
+![Send Form](./screenshots/04-send-form.png)
+
+### Transaction Result — History with successful on-chain payment
+![Transaction History](./screenshots/05-transaction-history.png)
+
 ---
 
 Built for the [Rise In — Stellar Journey to Mastery](https://risein.com/programs/stellar-journey-to-mastery-monthly-builder-challenges) White Belt Level 1 challenge.
