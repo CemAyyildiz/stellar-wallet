@@ -1,62 +1,61 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
-  generateWallet,
-  fundWithFriendbot,
-  getBalance,
-  sendPayment,
-  getTransactions,
-} from "./stellar";
+  checkFreighterInstalled,
+  connectFreighterWallet,
+  sendPaymentWithFreighter,
+} from "./freighter";
+import { fundWithFriendbot, getBalance, getTransactions } from "./stellar";
 import "./App.css";
 
 const TABS = ["Wallet", "Fund", "Send", "History"];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("Wallet");
-  const [wallet, setWallet] = useState(null);
+  const [publicKey, setPublicKey] = useState(null);
+  const [freighterInstalled, setFreighterInstalled] = useState(null);
   const [balance, setBalance] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState("");
   const [toast, setToast] = useState(null);
   const [sendForm, setSendForm] = useState({ destination: "", amount: "", memo: "" });
-  const [showSecret, setShowSecret] = useState(false);
-  const [importSecret, setImportSecret] = useState("");
 
   const showToast = (message, type = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
 
-  const handleGenerate = () => {
-    const newWallet = generateWallet();
-    setWallet(newWallet);
-    setBalance(null);
-    setTransactions([]);
-    showToast("New wallet generated! Fund it with Friendbot to activate.");
-  };
+  useEffect(() => {
+    checkFreighterInstalled().then(setFreighterInstalled);
+  }, []);
 
-  const handleImport = () => {
+  const handleConnect = async () => {
+    setLoading("connect");
     try {
-      const { Keypair } = window.__stellarSdk || {};
-      // Use SDK directly for import
-      import("@stellar/stellar-sdk").then(({ Keypair }) => {
-        const kp = Keypair.fromSecret(importSecret.trim());
-        setWallet({ publicKey: kp.publicKey(), secretKey: importSecret.trim() });
-        setBalance(null);
-        setTransactions([]);
-        setImportSecret("");
-        showToast("Wallet imported successfully!");
-      });
-    } catch {
-      showToast("Invalid secret key.", "error");
+      const address = await connectFreighterWallet();
+      setPublicKey(address);
+      setBalance(null);
+      setTransactions([]);
+      showToast("Freighter wallet connected!");
+    } catch (e) {
+      showToast(e.message || "Failed to connect wallet.", "error");
+    } finally {
+      setLoading("");
     }
   };
 
+  const handleDisconnect = () => {
+    setPublicKey(null);
+    setBalance(null);
+    setTransactions([]);
+    showToast("Wallet disconnected.");
+  };
+
   const handleFund = async () => {
-    if (!wallet) return showToast("Generate a wallet first.", "error");
+    if (!publicKey) return showToast("Connect your Freighter wallet first.", "error");
     setLoading("fund");
     try {
-      await fundWithFriendbot(wallet.publicKey);
-      const bal = await getBalance(wallet.publicKey);
+      await fundWithFriendbot(publicKey);
+      const bal = await getBalance(publicKey);
       setBalance(bal);
       showToast("Funded with 10,000 XLM from Friendbot!");
     } catch (e) {
@@ -67,34 +66,34 @@ export default function App() {
   };
 
   const handleRefreshBalance = useCallback(async () => {
-    if (!wallet) return;
+    if (!publicKey) return;
     setLoading("balance");
     try {
-      const bal = await getBalance(wallet.publicKey);
+      const bal = await getBalance(publicKey);
       setBalance(bal);
     } catch {
-      showToast("Could not fetch balance. Account may not be activated.", "error");
+      showToast("Could not fetch balance. Fund your account with Friendbot first.", "error");
     } finally {
       setLoading("");
     }
-  }, [wallet]);
+  }, [publicKey]);
 
   const handleSend = async (e) => {
     e.preventDefault();
-    if (!wallet) return showToast("No wallet loaded.", "error");
+    if (!publicKey) return showToast("Connect your Freighter wallet first.", "error");
     if (!sendForm.destination || !sendForm.amount) return showToast("Fill all fields.", "error");
     setLoading("send");
     try {
-      const result = await sendPayment(
-        wallet.secretKey,
+      const result = await sendPaymentWithFreighter(
+        publicKey,
         sendForm.destination,
         sendForm.amount,
         sendForm.memo
       );
-      const bal = await getBalance(wallet.publicKey);
+      const bal = await getBalance(publicKey);
       setBalance(bal);
       setSendForm({ destination: "", amount: "", memo: "" });
-      showToast(`Sent! Tx: ${result.hash.slice(0, 16)}...`);
+      showToast(`Transaction signed and submitted! Tx: ${result.hash.slice(0, 16)}...`);
     } catch (e) {
       showToast(e.message || "Transaction failed.", "error");
     } finally {
@@ -103,10 +102,10 @@ export default function App() {
   };
 
   const handleHistory = async () => {
-    if (!wallet) return showToast("No wallet loaded.", "error");
+    if (!publicKey) return showToast("Connect your Freighter wallet first.", "error");
     setLoading("history");
     try {
-      const txs = await getTransactions(wallet.publicKey);
+      const txs = await getTransactions(publicKey);
       setTransactions(txs);
       if (txs.length === 0) showToast("No transactions found.", "info");
     } catch {
@@ -140,10 +139,13 @@ export default function App() {
       </header>
 
       <main className="main">
-        {/* Wallet Card */}
         <div className="card wallet-card">
-          {wallet ? (
+          {publicKey ? (
             <>
+              <div className="wallet-card__status">
+                <span className="status-dot" />
+                Connected via Freighter
+              </div>
               <div className="wallet-card__balance">
                 <span className="wallet-card__label">Balance</span>
                 <span className="wallet-card__amount">
@@ -161,35 +163,25 @@ export default function App() {
               <div className="wallet-card__key">
                 <span className="wallet-card__label">Public Key</span>
                 <code className="wallet-card__addr">
-                  {wallet.publicKey.slice(0, 12)}…{wallet.publicKey.slice(-8)}
+                  {publicKey.slice(0, 12)}…{publicKey.slice(-8)}
                 </code>
                 <button
                   className="icon-btn"
                   onClick={() => {
-                    navigator.clipboard.writeText(wallet.publicKey);
+                    navigator.clipboard.writeText(publicKey);
                     showToast("Copied!");
                   }}
                 >⎘</button>
               </div>
-              <div className="wallet-card__key">
-                <span className="wallet-card__label">Secret Key</span>
-                <code className="wallet-card__addr secret">
-                  {showSecret ? wallet.secretKey : "S••••••••••••••••••••••••••••••••••••••••••••••••••••••"}
-                </code>
-                <button className="icon-btn" onClick={() => setShowSecret(!showSecret)}>
-                  {showSecret ? "🙈" : "👁"}
-                </button>
-              </div>
             </>
           ) : (
             <div className="wallet-card__empty">
-              <p>No wallet loaded</p>
-              <p className="muted">Generate a new wallet or import an existing one</p>
+              <p>No wallet connected</p>
+              <p className="muted">Connect your Freighter extension to get started</p>
             </div>
           )}
         </div>
 
-        {/* Tabs */}
         <div className="tabs">
           {TABS.map((t) => (
             <button
@@ -198,7 +190,7 @@ export default function App() {
               onClick={() => {
                 setActiveTab(t);
                 if (t === "History") handleHistory();
-                if (t === "Wallet") handleRefreshBalance();
+                if (t === "Wallet" && publicKey) handleRefreshBalance();
               }}
             >
               {t}
@@ -206,27 +198,53 @@ export default function App() {
           ))}
         </div>
 
-        {/* Tab Content */}
         <div className="panel">
           {activeTab === "Wallet" && (
             <div className="section">
-              <h2>Manage Wallet</h2>
-              <button className="btn btn--primary" onClick={handleGenerate}>
-                Generate New Wallet
-              </button>
-              <div className="divider"><span>or import</span></div>
-              <div className="input-row">
-                <input
-                  type="password"
-                  placeholder="Enter secret key (S...)"
-                  value={importSecret}
-                  onChange={(e) => setImportSecret(e.target.value)}
-                  className="input"
-                />
-                <button className="btn btn--secondary" onClick={handleImport}>
-                  Import
-                </button>
-              </div>
+              <h2>Connect Wallet</h2>
+              {freighterInstalled === false && (
+                <div className="info-box info-box--warning">
+                  <span className="info-box__label">Freighter not detected</span>
+                  <p className="muted">
+                    Install the{" "}
+                    <a href="https://www.freighter.app/" target="_blank" rel="noreferrer">
+                      Freighter browser extension
+                    </a>{" "}
+                    and set the network to Testnet.
+                  </p>
+                </div>
+              )}
+              {!publicKey ? (
+                <>
+                  <p className="muted">
+                    Click below to request permission via Freighter&apos;s{" "}
+                    <code>setAllowed</code> API, then retrieve your public key.
+                  </p>
+                  <button
+                    className="btn btn--primary"
+                    onClick={handleConnect}
+                    disabled={loading === "connect" || freighterInstalled === false}
+                  >
+                    {loading === "connect" ? (
+                      <>
+                        <Spinner /> Connecting…
+                      </>
+                    ) : (
+                      "Connect Wallet"
+                    )}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="info-box">
+                    <span className="info-box__label">Connected address</span>
+                    <code>{publicKey}</code>
+                  </div>
+                  <button className="btn btn--secondary" onClick={handleDisconnect}>
+                    Disconnect Wallet
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -234,16 +252,16 @@ export default function App() {
             <div className="section">
               <h2>Fund with Friendbot</h2>
               <p className="muted">Get free Testnet XLM to activate your account. Works only on Testnet.</p>
-              {wallet && (
+              {publicKey && (
                 <div className="info-box">
                   <span className="info-box__label">Funding address</span>
-                  <code>{wallet.publicKey}</code>
+                  <code>{publicKey}</code>
                 </div>
               )}
               <button
                 className="btn btn--primary"
                 onClick={handleFund}
-                disabled={loading === "fund" || !wallet}
+                disabled={loading === "fund" || !publicKey}
               >
                 {loading === "fund" ? <><Spinner /> Funding…</> : "Fund with Friendbot (10,000 XLM)"}
               </button>
@@ -253,6 +271,9 @@ export default function App() {
           {activeTab === "Send" && (
             <div className="section">
               <h2>Send XLM</h2>
+              <p className="muted">
+                Transactions are signed in Freighter via <code>signTransaction</code>.
+              </p>
               <form onSubmit={handleSend} className="form">
                 <label className="label">Destination Address</label>
                 <input
@@ -285,9 +306,9 @@ export default function App() {
                 <button
                   className="btn btn--primary"
                   type="submit"
-                  disabled={loading === "send" || !wallet}
+                  disabled={loading === "send" || !publicKey}
                 >
-                  {loading === "send" ? <><Spinner /> Sending…</> : "Send XLM →"}
+                  {loading === "send" ? <><Spinner /> Signing in Freighter…</> : "Sign & Send XLM →"}
                 </button>
               </form>
             </div>
@@ -306,7 +327,7 @@ export default function App() {
               {transactions.length > 0 ? (
                 <div className="tx-list">
                   {transactions.map((tx) => {
-                    const isOutgoing = tx.from === wallet?.publicKey;
+                    const isOutgoing = tx.from === publicKey;
                     return (
                       <div key={tx.id} className={`tx-item ${isOutgoing ? "tx-item--out" : "tx-item--in"}`}>
                         <div className="tx-item__direction">{isOutgoing ? "↑ Sent" : "↓ Received"}</div>
@@ -335,7 +356,7 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        Built on <strong>Stellar Testnet</strong> · White Belt Level 1 · Rise In Challenge
+        Built on <strong>Stellar Testnet</strong> · Freighter Wallet · White Belt Level 1 · Rise In Challenge
       </footer>
     </div>
   );
